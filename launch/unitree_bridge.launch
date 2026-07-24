@@ -1,0 +1,4 @@
+<launch>
+    <rosparam file="$(find unitree_bridge)/config/unitree_bridge.yaml" command="load" ns="unitree_bridge_node"/>
+    <node pkg="unitree_bridge" type="unitree_bridge_node" name="unitree_bridge_node" output="screen"/>
+</launch>
