@@ -112,6 +112,28 @@ void CmdVelBridge::applyInitialMotionMode() {
     if (disable_obstacle_avoid_on_start_ && !classic_walk_on_start_ && mode_settle_sec_ > 0.0) {
         ros::Duration(mode_settle_sec_).sleep();
     }
+
+    logFinalMotionMode();
+}
+
+void CmdVelBridge::logFinalMotionMode() {
+    unitree_go::msg::dds_::SportModeState_ state;
+    if (!waitForFreshSportState(state_wait_timeout_sec_, state)) {
+        ROS_WARN("[unitree_bridge] ===== 最终运动模式: 读取 %s 超时(%.1fs)，未能确认 =====",
+                 sport_state_topic_.c_str(), state_wait_timeout_sec_);
+        return;
+    }
+
+    const uint32_t mode = state.error_code();
+    const char* name = SportModeName(mode);
+
+    if (expected_mode_ >= 0 && mode != static_cast<uint32_t>(expected_mode_)) {
+        ROS_WARN("[unitree_bridge] ===== 最终运动模式: %u(%s)，与期望的 %d(%s) 不符 =====", mode, name,
+                 expected_mode_, SportModeName(static_cast<uint32_t>(expected_mode_)));
+        return;
+    }
+
+    ROS_INFO("[unitree_bridge] ===== 最终运动模式: %u(%s) =====", mode, name);
 }
 
 void CmdVelBridge::sportStateHandler(const void* msg) {

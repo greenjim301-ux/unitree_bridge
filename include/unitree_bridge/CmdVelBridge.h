@@ -56,6 +56,12 @@ private:
     // 切换失败会重试 classic_walk_retry_ 次。
     bool confirmClassicWalk();
 
+    // 启动收尾时再回读一次，把机器人最终停在哪个运动模式明确打屏。
+    // 和 confirmClassicWalk() 里的回读分开：那次是切换过程中的校验，可能中途
+    // 重试、可能被跳过（classic_walk_on_start=false）；这次无论走没走切换流程
+    // 都执行，保证日志里总有一行说明"接管 cmd_vel 时机器人是什么步态"。
+    void logFinalMotionMode();
+
     // DDS 线程回调，缓存最近一帧状态
     void sportStateHandler(const void* msg);
     // 清掉缓存后等待下一帧新状态，超时返回 false

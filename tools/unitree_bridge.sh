@@ -40,6 +40,29 @@ setup_env() {
     source "$WS_DIR/devel/setup.bash"
 }
 
+# roslaunch 的输出整个重定向进了 $LOG_FILE,节点里 ROS_INFO/printf 打的东西都
+# 落到文件里而不是终端。启动完成后把最终运动模式那行捞出来回显,免得每次都要
+# 去翻日志。等待时间可以用环境变量 FINAL_MODE_WAIT 调整(节点里 RecoveryStand
+# 要等 stand_settle_sec,切步态还要等 mode_settle_sec,所以默认给得比较宽)。
+FINAL_MODE_MARK='最终运动模式'
+FINAL_MODE_WAIT=${FINAL_MODE_WAIT:-20}
+
+report_final_mode() {
+    local line=""
+    for _ in $(seq 1 "$FINAL_MODE_WAIT"); do
+        pid_alive "$PID_FILE" || break
+        line=$(grep -a -m1 "$FINAL_MODE_MARK" "$LOG_FILE" 2>/dev/null || true)
+        [ -n "$line" ] && break
+        sleep 1
+    done
+
+    if [ -n "$line" ]; then
+        echo "$line"
+    else
+        echo "警告: ${FINAL_MODE_WAIT}s 内未在日志里看到最终运动模式,自己查一下 $LOG_FILE" >&2
+    fi
+}
+
 ensure_master() {
     if timeout 3 rostopic list >/dev/null 2>&1; then return; fi
     if pid_alive "$ROSCORE_PID_FILE"; then return; fi # roscore 刚起还没就绪
@@ -61,6 +84,7 @@ start() {
     sleep 3
     if pid_alive "$PID_FILE"; then
         echo "$NAME 已启动 (pid $(cat "$PID_FILE")),日志: $LOG_FILE"
+        report_final_mode
     else
         echo "$NAME 启动失败,日志尾部:" >&2
         tail -n 20 "$LOG_FILE" >&2
