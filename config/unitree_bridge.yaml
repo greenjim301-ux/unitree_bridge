@@ -20,3 +20,17 @@ stand_settle_sec: 3.0 # 发完 RecoveryStand() 后阻塞等待这么久再开始
 disable_obstacle_avoid_on_start: true # 关闭机身自带避障：它会拦改我们下发的 Move()，和 SCAN-Planner 的局部避障抢控制权
 classic_walk_on_start: true # 切换到经典步态：速度跟随比 AI 步态更线性，侧移更稳，适合闭环速度控制
 mode_settle_sec: 1.0 # 切完避障开关/步态后阻塞等待这么久，给切换动作留出执行时间
+
+# 步态切换的回读确认。SDK 的 SportClient 没有 ClassicWalkGet() 这类查询接口，
+# 唯一的回读通道是下面这个 DDS 状态话题。按《运动服务接口 V2.0》文档，当前模式
+# 是通过 SportModeState 的 error_code 字段回报的（"由于模式较多，采用该成员变量
+# 反馈信息"），所以判定看 error_code，mode/gait_type 只作为诊断信息一起打印。
+sport_state_topic: rt/sportmodestate # Go2 运动状态话题（部分机型是 rt/lf/sportmodestate）
+state_wait_timeout_sec: 2.0 # 发完 ClassicWalk() 后等一帧新状态的超时
+classic_walk_retry: 2 # 回读到模式不对时额外重发 ClassicWalk(true) 的次数
+expected_mode: 2010 # 期望的 error_code(当前模式)：2010 = 经典。
+  # 取值表来自《运动服务接口 V2.0》，常见值：1002 站立锁定 / 1013 平衡站立 /
+  # 1015 常规行走 / 1016 常规跑步 / 1017 常规续航 / 2010 经典 / 2016 交叉步 /
+  # 2017 直立（完整表在 CmdVelBridge.cpp 的 SportModeName 里）。
+  # 注意这套模式号 != sport_api.hpp 的 API ID（ClassicWalk 的 API ID 是 2049）。
+  # 设为 -1 可关掉校验，只打印实测值。

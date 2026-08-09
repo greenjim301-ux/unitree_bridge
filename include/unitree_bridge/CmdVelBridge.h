@@ -17,6 +17,8 @@
 #include <geometry_msgs/Twist.h>
 #include <ros/ros.h>
 
+#include <unitree/idl/go2/SportModeState_.hpp>
+#include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/robot/go2/obstacles_avoid/obstacles_avoid_client.hpp>
 #include <unitree/robot/go2/sport/sport_client.hpp>
 
@@ -42,10 +44,32 @@ private:
     // 经典步态相比 AI 步态速度跟随更线性、侧移更稳，适合闭环速度控制。
     void applyInitialMotionMode();
 
+    // 发完 ClassicWalk(true) 之后回读机器人状态确认真的切过去了。
+    // unitree_sdk2 的 SportClient 没有 ClassicWalkGet() 之类的查询接口
+    // （只有 AutoRecoverGet 这一个 Get），唯一的回读通道是 DDS 状态话题
+    // rt/sportmodestate，所以这里订阅它。
+    //
+    // 看的是 error_code 字段：按 Unitree《运动服务接口 V2.0》文档，
+    //   uint32_t error_code(); // 当前模式（由于模式较多，采用该成员变量反馈信息）
+    // 也就是这个字段被复用来回报当前运动模式，而不是字面意义的错误码。
+    // mode/gait_type 也一起打出来做诊断，但判定以 error_code 为准。
+    // 切换失败会重试 classic_walk_retry_ 次。
+    bool confirmClassicWalk();
+
+    // DDS 线程回调，缓存最近一帧状态
+    void sportStateHandler(const void* msg);
+    // 清掉缓存后等待下一帧新状态，超时返回 false
+    bool waitForFreshSportState(double timeout_sec, unitree_go::msg::dds_::SportModeState_& out);
+
     ros::Subscriber cmd_vel_sub_;
     ros::Timer control_timer_;
     unitree::robot::go2::SportClient sport_client_;
     unitree::robot::go2::ObstaclesAvoidClient obstacles_avoid_client_;
+    unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> sport_state_sub_;
+
+    std::mutex state_mutex_;
+    unitree_go::msg::dds_::SportModeState_ last_state_;
+    bool have_state_ = false;
 
     std::mutex cmd_mutex_;
     double vx_ = 0.0;
@@ -66,6 +90,16 @@ private:
     bool disable_obstacle_avoid_on_start_ = true; // 开机是否关闭机身自带避障（ObstaclesAvoidClient::SwitchSet(false)）
     bool classic_walk_on_start_ = true;           // 开机是否切换到经典步态（SportClient::ClassicWalk(true)）
     double mode_settle_sec_ = 1.0;                // 切模式/步态后阻塞等待这么久，给切换动作留出执行时间
+
+    std::string sport_state_topic_ = "rt/sportmodestate"; // 回读步态用的 DDS 状态话题
+    double state_wait_timeout_sec_ = 2.0;                 // 等一帧新状态的超时
+    int classic_walk_retry_ = 2;                          // 回读到模式不对时额外重发 ClassicWalk(true) 的次数
+    // 期望的 error_code(当前模式) 取值。2010 = 经典，取自《运动服务接口 V2.0》
+    // 的状态机取值表（完整表见 CmdVelBridge.cpp 里的 SportModeName）。
+    // 注意这套模式编号跟 sport_api.hpp 的 API ID 是两套东西：ClassicWalk 的
+    // API ID 是 2049，而它切过去之后回报的模式号是 2010。
+    // 设为 -1 可以关掉校验，只打印实测值。
+    int expected_mode_ = 2010;
 };
 
 }  // namespace unitree_bridge
