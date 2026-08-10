@@ -19,7 +19,6 @@
 
 #include <unitree/idl/go2/SportModeState_.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
-#include <unitree/robot/go2/obstacles_avoid/obstacles_avoid_client.hpp>
 #include <unitree/robot/go2/sport/sport_client.hpp>
 
 namespace unitree_bridge {
@@ -38,9 +37,7 @@ private:
     // 站稳之前不会创建 cmd_vel 订阅者，保证站立完成前不会响应任何速度指令。
     void autoStandOnStart();
 
-    // 站立完成后设置机器人的初始运动模式：关闭机身自带的避障，切到经典步态。
-    // 自带避障必须关掉——它会拦截/改写我们下发的 Move()，跟 SCAN-Planner 的
-    // 局部避障抢控制权，表现为狗"不听话地绕路"或原地卡住。
+    // 站立完成后设置机器人的初始运动模式：切到经典步态。
     // 经典步态相比 AI 步态速度跟随更线性、侧移更稳，适合闭环速度控制。
     void applyInitialMotionMode();
 
@@ -70,7 +67,6 @@ private:
     ros::Subscriber cmd_vel_sub_;
     ros::Timer control_timer_;
     unitree::robot::go2::SportClient sport_client_;
-    unitree::robot::go2::ObstaclesAvoidClient obstacles_avoid_client_;
     unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> sport_state_sub_;
 
     std::mutex state_mutex_;
@@ -93,7 +89,6 @@ private:
     bool auto_stand_on_start_ = true; // 开机是否自动 RecoveryStand()
     double stand_settle_sec_ = 3.0;   // 发完 RecoveryStand() 后阻塞等待这么久，给站立动作留出物理执行时间
 
-    bool disable_obstacle_avoid_on_start_ = true; // 开机是否关闭机身自带避障（ObstaclesAvoidClient::SwitchSet(false)）
     bool classic_walk_on_start_ = true;           // 开机是否切换到经典步态（SportClient::ClassicWalk(true)）
     double mode_settle_sec_ = 1.0;                // 切模式/步态后阻塞等待这么久，给切换动作留出执行时间
 

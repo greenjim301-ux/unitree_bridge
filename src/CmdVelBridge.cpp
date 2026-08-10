@@ -40,7 +40,6 @@ CmdVelBridge::CmdVelBridge(ros::NodeHandle& nh, ros::NodeHandle& pnh) {
     pnh.param("sport_client_timeout_sec", sport_client_timeout_sec, sport_client_timeout_sec);
     pnh.param("auto_stand_on_start", auto_stand_on_start_, auto_stand_on_start_);
     pnh.param("stand_settle_sec", stand_settle_sec_, stand_settle_sec_);
-    pnh.param("disable_obstacle_avoid_on_start", disable_obstacle_avoid_on_start_, disable_obstacle_avoid_on_start_);
     pnh.param("classic_walk_on_start", classic_walk_on_start_, classic_walk_on_start_);
     pnh.param("mode_settle_sec", mode_settle_sec_, mode_settle_sec_);
     pnh.param("sport_state_topic", sport_state_topic_, sport_state_topic_);
@@ -51,8 +50,6 @@ CmdVelBridge::CmdVelBridge(ros::NodeHandle& nh, ros::NodeHandle& pnh) {
     // ChannelFactory::Instance()->Init(...) 已经在 main() 里调用过，这里只初始化 client 本身
     sport_client_.SetTimeout(static_cast<float>(sport_client_timeout_sec));
     sport_client_.Init();
-    obstacles_avoid_client_.SetTimeout(static_cast<float>(sport_client_timeout_sec));
-    obstacles_avoid_client_.Init();
 
     // 状态回读通道，要在 applyInitialMotionMode() 之前建好
     sport_state_sub_ =
@@ -76,41 +73,12 @@ CmdVelBridge::CmdVelBridge(ros::NodeHandle& nh, ros::NodeHandle& pnh) {
                                                         << " max_vx=" << max_vx_ << " max_vy=" << max_vy_
                                                         << " max_vyaw=" << max_vyaw_
                                                         << " auto_stand_on_start=" << auto_stand_on_start_
-                                                        << " disable_obstacle_avoid_on_start=" << disable_obstacle_avoid_on_start_
                                                         << " classic_walk_on_start=" << classic_walk_on_start_);
 }
 
 void CmdVelBridge::applyInitialMotionMode() {
-    // 先关避障再切步态：避障模块开着的时候会接管运动指令，切步态可能被它拦下
-    if (disable_obstacle_avoid_on_start_) {
-        ROS_INFO("[unitree_bridge] disabling built-in obstacle avoidance ...");
-        const int32_t ret = obstacles_avoid_client_.SwitchSet(false);
-        if (ret != 0) {
-            ROS_ERROR("[unitree_bridge] ObstaclesAvoid SwitchSet(false) failed, error code=%d. "
-                      "机身自带避障可能仍然开着，会和 SCAN-Planner 抢控制权，请手动用 App 关闭后再跑导航。",
-                      ret);
-        } else {
-            // 回读确认：SwitchSet 返回 0 只代表 RPC 成功，以实际状态为准
-            bool enabled = true;
-            const int32_t get_ret = obstacles_avoid_client_.SwitchGet(enabled);
-            if (get_ret != 0) {
-                ROS_WARN("[unitree_bridge] ObstaclesAvoid SwitchGet() failed, error code=%d, 无法确认避障是否已关闭",
-                         get_ret);
-            } else if (enabled) {
-                ROS_ERROR("[unitree_bridge] 避障开关回读仍为 ON，关闭没有生效，请检查机器人端避障服务状态");
-            } else {
-                ROS_INFO("[unitree_bridge] built-in obstacle avoidance is OFF");
-            }
-        }
-    }
-
     if (classic_walk_on_start_) {
         confirmClassicWalk();
-    }
-
-    // 走了 confirmClassicWalk() 的话里面已经等过 mode_settle_sec_ 了，不再重复等
-    if (disable_obstacle_avoid_on_start_ && !classic_walk_on_start_ && mode_settle_sec_ > 0.0) {
-        ros::Duration(mode_settle_sec_).sleep();
     }
 
     logFinalMotionMode();
