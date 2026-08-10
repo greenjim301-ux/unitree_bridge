@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# unitree_bridge 启停脚本
+# unitree_bridge start/stop script
 #
-# 用法: unitree_bridge.sh {start|stop|restart|status|log} [roslaunch 额外参数...]
+# Usage: unitree_bridge.sh {start|stop|restart|status|log} [extra roslaunch args...]
 #
-# - start 时自动准备环境:roslaunch 不在 PATH 且有 mamba 时激活 ros_host,
-#   再 source 工作区 devel/setup.bash(工作区默认取脚本位置向上三级,可用
-#   环境变量 ROS_WS 覆盖,如设备上路径不同时)。
-# - ROS master 不可达时自动后台起一个 roscore,pid 记在 <ws>/run/roscore.pid。
-#   roscore 由各包脚本共用,stop 不会杀它;不需要时 kill $(cat run/roscore.pid)。
-# - stop 先发 SIGINT 让 roslaunch 走正常关闭流程,15s 不退再升级 TERM/KILL。
+# - start prepares the environment automatically: if roslaunch is not on
+#   PATH and mamba is available, activates ros_host, then sources the
+#   workspace's devel/setup.bash (workspace defaults to three levels above
+#   this script's location; override with the ROS_WS env var if the path
+#   differs on a given machine).
+# - If the ROS master is unreachable, a roscore is started in the
+#   background automatically; its pid is recorded in <ws>/run/roscore.pid.
+#   roscore is shared across package scripts, so stop does not kill it;
+#   kill $(cat run/roscore.pid) manually when it's no longer needed.
+# - stop sends SIGINT first so roslaunch can shut down cleanly; if it has
+#   not exited after 15s, escalates to SIGTERM/SIGKILL.
 set -eo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -29,22 +34,26 @@ pid_alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
 setup_env() {
     if ! command -v roslaunch >/dev/null 2>&1 && command -v mamba >/dev/null 2>&1; then
-        # 开发机:ROS 装在 mamba 的 ros_host 环境里;设备上系统自带 ROS 则不会走到这
+        # dev machine: ROS lives in the mamba ros_host env; on-device ROS
+        # installs are on PATH already, so this branch is skipped there
         eval "$(mamba shell hook --shell bash)"
         mamba activate ros_host
     fi
     if [ ! -f "$WS_DIR/devel/setup.bash" ]; then
-        echo "找不到 $WS_DIR/devel/setup.bash,先 catkin_make,或用 ROS_WS 指定工作区" >&2
+        echo "Could not find $WS_DIR/devel/setup.bash - run catkin_make first, or set ROS_WS to point at the workspace" >&2
         exit 1
     fi
     source "$WS_DIR/devel/setup.bash"
 }
 
-# roslaunch 的输出整个重定向进了 $LOG_FILE,节点里 ROS_INFO/printf 打的东西都
-# 落到文件里而不是终端。启动完成后把最终运动模式那行捞出来回显,免得每次都要
-# 去翻日志。等待时间可以用环境变量 FINAL_MODE_WAIT 调整(节点里 RecoveryStand
-# 要等 stand_settle_sec,切步态还要等 mode_settle_sec,所以默认给得比较宽)。
-FINAL_MODE_MARK='最终运动模式'
+# roslaunch's entire output is redirected into $LOG_FILE, so ROS_INFO/printf
+# from the node land in the file rather than the terminal. Once startup
+# finishes, grep the final-motion-mode line back out of the log and echo it
+# so you don't have to open the log file every time. The wait can be tuned
+# with the FINAL_MODE_WAIT env var (defaults wide because the node waits
+# stand_settle_sec for RecoveryStand plus mode_settle_sec for the gait
+# switch before that line is printed).
+FINAL_MODE_MARK='Final motion mode'
 FINAL_MODE_WAIT=${FINAL_MODE_WAIT:-20}
 
 report_final_mode() {
@@ -59,21 +68,21 @@ report_final_mode() {
     if [ -n "$line" ]; then
         echo "$line"
     else
-        echo "警告: ${FINAL_MODE_WAIT}s 内未在日志里看到最终运动模式,自己查一下 $LOG_FILE" >&2
+        echo "Warning: did not see the final motion mode in the log within ${FINAL_MODE_WAIT}s, check $LOG_FILE" >&2
     fi
 }
 
 ensure_master() {
     if timeout 3 rostopic list >/dev/null 2>&1; then return; fi
-    if pid_alive "$ROSCORE_PID_FILE"; then return; fi # roscore 刚起还没就绪
-    echo "ROS master 不可达,后台启动 roscore(日志: $ROSCORE_LOG_FILE)"
+    if pid_alive "$ROSCORE_PID_FILE"; then return; fi # roscore just started, not ready yet
+    echo "ROS master unreachable, starting roscore in the background (log: $ROSCORE_LOG_FILE)"
     nohup roscore >"$ROSCORE_LOG_FILE" 2>&1 &
     echo $! >"$ROSCORE_PID_FILE"
 }
 
 start() {
     if pid_alive "$PID_FILE"; then
-        echo "$NAME 已在运行 (pid $(cat "$PID_FILE"))"
+        echo "$NAME is already running (pid $(cat "$PID_FILE"))"
         return
     fi
     setup_env
@@ -83,10 +92,10 @@ start() {
     echo $! >"$PID_FILE"
     sleep 3
     if pid_alive "$PID_FILE"; then
-        echo "$NAME 已启动 (pid $(cat "$PID_FILE")),日志: $LOG_FILE"
+        echo "$NAME started (pid $(cat "$PID_FILE")), log: $LOG_FILE"
         report_final_mode
     else
-        echo "$NAME 启动失败,日志尾部:" >&2
+        echo "$NAME failed to start, log tail:" >&2
         tail -n 20 "$LOG_FILE" >&2
         rm -f "$PID_FILE"
         exit 1
@@ -95,33 +104,33 @@ start() {
 
 stop() {
     if ! pid_alive "$PID_FILE"; then
-        echo "$NAME 未在运行"
+        echo "$NAME is not running"
         rm -f "$PID_FILE"
         return
     fi
     local pid
     pid=$(cat "$PID_FILE")
-    echo "停止 $NAME (pid $pid) ..."
+    echo "Stopping $NAME (pid $pid) ..."
     kill -INT "$pid" 2>/dev/null || true
     for _ in $(seq 1 15); do
         kill -0 "$pid" 2>/dev/null || break
         sleep 1
     done
     if kill -0 "$pid" 2>/dev/null; then
-        echo "SIGINT 15s 未退出,升级 SIGTERM/SIGKILL"
+        echo "Did not exit within 15s of SIGINT, escalating to SIGTERM/SIGKILL"
         kill -TERM "$pid" 2>/dev/null || true
         sleep 3
         kill -KILL "$pid" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
-    echo "$NAME 已停止"
+    echo "$NAME stopped"
 }
 
 status() {
     if pid_alive "$PID_FILE"; then
-        echo "$NAME 运行中 (pid $(cat "$PID_FILE"))"
+        echo "$NAME running (pid $(cat "$PID_FILE"))"
     else
-        echo "$NAME 未运行"
+        echo "$NAME not running"
     fi
 }
 
@@ -137,7 +146,7 @@ case "$cmd" in
     status) status ;;
     log) exec tail -n 50 -f "$LOG_FILE" ;;
     *)
-        echo "用法: $(basename "$0") {start|stop|restart|status|log} [roslaunch 额外参数...]" >&2
+        echo "Usage: $(basename "$0") {start|stop|restart|status|log} [extra roslaunch args...]" >&2
         exit 1
         ;;
 esac

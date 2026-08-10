@@ -11,20 +11,37 @@ double Clamp(double v, double limit) { return std::max(-limit, std::min(limit, v
 // rt/sportmodestate 的 error_code 字段回报的运动状态机取值，来自 Unitree
 // 《运动服务接口 V2.0》文档。注意这套编号跟 sport_api.hpp 里的 API ID
 // 不是一回事（比如 ClassicWalk 的 API ID 是 2049，而经典模式号是 2010）。
+// 打印用的名字是英文翻译，行尾注释保留文档原文的中文名，方便对照。
 const char* SportModeName(uint32_t code) {
     static const std::unordered_map<uint32_t, const char*> kNames = {
-        {100, "灵动"},        {1001, "阻尼"},     {1002, "站立锁定"},
-        {1004, "蹲下"},       {2006, "蹲下"},     {1006, "打招呼/伸懒腰/舞蹈/拜年/比心/开心"},
-        {1007, "坐下"},       {1008, "前跳"},     {1009, "扑人"},
-        {1013, "平衡站立"},   {1015, "常规行走"}, {1016, "常规跑步"},
-        {1017, "常规续航"},   {1091, "摆姿势"},   {2007, "闪避"},
-        {2008, "并腿跑"},     {2009, "跳跃跑"},   {2010, "经典"},
-        {2011, "倒立"},       {2012, "前空翻"},   {2013, "后空翻"},
-        {2014, "左空翻"},     {2016, "交叉步"},   {2017, "直立"},
-        {2019, "牵引"},
+        {100, "Agile"},                                    // 灵动
+        {1001, "Damping"},                                 // 阻尼
+        {1002, "Standing Lock"},                            // 站立锁定
+        {1004, "Squat"},                                    // 蹲下
+        {2006, "Squat"},                                    // 蹲下
+        {1006, "Greeting/Stretch/Dance/NewYear/Heart/Happy"}, // 打招呼/伸懒腰/舞蹈/拜年/比心/开心
+        {1007, "Sit"},                                      // 坐下
+        {1008, "Front Jump"},                                // 前跳
+        {1009, "Pounce"},                                    // 扑人
+        {1013, "Balance Stand"},                             // 平衡站立
+        {1015, "Normal Walk"},                               // 常规行走
+        {1016, "Normal Run"},                                // 常规跑步
+        {1017, "Normal Endurance"},                          // 常规续航
+        {1091, "Pose"},                                      // 摆姿势
+        {2007, "Dodge"},                                     // 闪避
+        {2008, "Bound Run"},                                 // 并腿跑
+        {2009, "Jump Run"},                                  // 跳跃跑
+        {2010, "Classic"},                                   // 经典
+        {2011, "Handstand"},                                 // 倒立
+        {2012, "Front Flip"},                                // 前空翻
+        {2013, "Back Flip"},                                 // 后空翻
+        {2014, "Left Flip"},                                 // 左空翻
+        {2016, "Cross Step"},                                // 交叉步
+        {2017, "Upright"},                                   // 直立
+        {2019, "Traction"},                                  // 牵引
     };
     const auto it = kNames.find(code);
-    return it == kNames.end() ? "未知" : it->second;
+    return it == kNames.end() ? "Unknown" : it->second;
 }
 }  // namespace
 
@@ -87,8 +104,8 @@ void CmdVelBridge::applyInitialMotionMode() {
 void CmdVelBridge::logFinalMotionMode() {
     unitree_go::msg::dds_::SportModeState_ state;
     if (!waitForFreshSportState(state_wait_timeout_sec_, state)) {
-        ROS_WARN("[unitree_bridge] ===== 最终运动模式: 读取 %s 超时(%.1fs)，未能确认 =====",
-                 sport_state_topic_.c_str(), state_wait_timeout_sec_);
+        ROS_WARN("[unitree_bridge] ===== Final motion mode: timed out (%.1fs) reading %s, could not confirm =====",
+                 state_wait_timeout_sec_, sport_state_topic_.c_str());
         return;
     }
 
@@ -96,12 +113,12 @@ void CmdVelBridge::logFinalMotionMode() {
     const char* name = SportModeName(mode);
 
     if (expected_mode_ >= 0 && mode != static_cast<uint32_t>(expected_mode_)) {
-        ROS_WARN("[unitree_bridge] ===== 最终运动模式: %u(%s)，与期望的 %d(%s) 不符 =====", mode, name,
-                 expected_mode_, SportModeName(static_cast<uint32_t>(expected_mode_)));
+        ROS_WARN("[unitree_bridge] ===== Final motion mode: %u(%s), does not match expected %d(%s) =====", mode,
+                 name, expected_mode_, SportModeName(static_cast<uint32_t>(expected_mode_)));
         return;
     }
 
-    ROS_INFO("[unitree_bridge] ===== 最终运动模式: %u(%s) =====", mode, name);
+    ROS_INFO("[unitree_bridge] ===== Final motion mode: %u(%s) =====", mode, name);
 }
 
 void CmdVelBridge::sportStateHandler(const void* msg) {
@@ -153,22 +170,22 @@ bool CmdVelBridge::confirmClassicWalk() {
 
         unitree_go::msg::dds_::SportModeState_ state;
         if (!waitForFreshSportState(state_wait_timeout_sec_, state)) {
-            ROS_WARN("[unitree_bridge] 等待 %s 状态超时(%.1fs)，无法确认步态。检查 network_interface "
-                     "是否正确、机器人运动控制服务是否在跑。",
-                     sport_state_topic_.c_str(), state_wait_timeout_sec_);
+            ROS_WARN("[unitree_bridge] Timed out (%.1fs) waiting for %s state, unable to confirm the gait. "
+                     "Check network_interface and whether the robot's sport_mode service is running.",
+                     state_wait_timeout_sec_, sport_state_topic_.c_str());
             continue;
         }
 
         // error_code 在运动服务接口里被复用为"当前模式"，不是字面的错误码；
         // mode/gait_type 一并打印，纯诊断用
         const uint32_t current_mode = state.error_code();
-        ROS_INFO("[unitree_bridge] sport state readback: error_code(当前模式)=%u(%s) fsm_mode=%d gait_type=%d",
+        ROS_INFO("[unitree_bridge] sport state readback: error_code(current mode)=%u(%s) fsm_mode=%d gait_type=%d",
                  current_mode, SportModeName(current_mode), static_cast<int>(state.mode()),
                  static_cast<int>(state.gait_type()));
 
         if (expected_mode_ < 0) {
             // 显式关掉校验：只把实测值打出来
-            ROS_WARN("[unitree_bridge] expected_mode=-1，只回读不校验");
+            ROS_WARN("[unitree_bridge] expected_mode=-1, readback only, no verification");
             return true;
         }
 
@@ -177,23 +194,25 @@ bool CmdVelBridge::confirmClassicWalk() {
             return true;
         }
 
-        ROS_WARN("[unitree_bridge] 模式回读不符：当前 %u(%s)，期望 %d(%s)", current_mode, SportModeName(current_mode),
-                 expected_mode_, SportModeName(static_cast<uint32_t>(expected_mode_)));
+        ROS_WARN("[unitree_bridge] Mode readback mismatch: current %u(%s), expected %d(%s)", current_mode,
+                 SportModeName(current_mode), expected_mode_, SportModeName(static_cast<uint32_t>(expected_mode_)));
     }
 
-    ROS_ERROR("[unitree_bridge] 经典步态切换未能确认，机器人可能仍处于其他模式。速度跟随和侧移特性会和"
-              "调参时不一致，建议停下检查后再跑导航。");
+    ROS_ERROR("[unitree_bridge] Could not confirm the classic walk switch; the robot may still be in another mode. "
+              "Speed tracking and lateral motion will differ from what was tuned for. Stop and check before "
+              "running navigation.");
     return false;
 }
 
 void CmdVelBridge::autoStandOnStart() {
-    ROS_WARN("[unitree_bridge] auto_stand_on_start=true: 确认机器人已放置在安全、周围无障碍的地面上");
+    ROS_WARN("[unitree_bridge] auto_stand_on_start=true: make sure the robot is on safe, obstacle-free ground "
+             "before it stands up");
     ROS_INFO("[unitree_bridge] calling RecoveryStand() ...");
     const int32_t ret = sport_client_.RecoveryStand();
     if (ret != 0) {
-        ROS_ERROR("[unitree_bridge] RecoveryStand() failed, error code=%d. 请确认 network_interface "
-                   "是否正确、机器人运动控制服务(sport_mode)是否已启动，再手动重启本节点。",
-                   ret);
+        ROS_ERROR("[unitree_bridge] RecoveryStand() failed, error code=%d. Check that network_interface is "
+                  "correct and the robot's sport_mode service is running, then restart this node manually.",
+                  ret);
         return;
     }
     ROS_INFO_STREAM("[unitree_bridge] RecoveryStand() issued, waiting " << stand_settle_sec_
