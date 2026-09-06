@@ -12,6 +12,7 @@ set(CMAKE_CXX_FLAGS "-O2 ${CMAKE_CXX_FLAGS}")
 find_package(catkin REQUIRED COMPONENTS
         roscpp
         geometry_msgs
+        topic_tools
 )
 
 # unitree_sdk2 是一个独立的、非 catkin 的 CMake 包，装在 /opt/unitree_robotics
@@ -21,7 +22,7 @@ find_package(unitree_sdk2 REQUIRED)
 
 catkin_package(
         INCLUDE_DIRS include
-        CATKIN_DEPENDS roscpp geometry_msgs
+        CATKIN_DEPENDS roscpp geometry_msgs topic_tools
 )
 
 include_directories(

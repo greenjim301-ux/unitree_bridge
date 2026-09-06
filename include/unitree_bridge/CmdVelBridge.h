@@ -1,7 +1,8 @@
 /*
  * unitree_bridge_node
  *
- * 订阅 cmd_vel（geometry_msgs::Twist），按固定频率通过 unitree_sdk2 的
+ * 订阅 cmd_vel（geometry_msgs::Twist 或 geometry_msgs::TwistStamped 均可），
+ * 按固定频率通过 unitree_sdk2 的
  * go2::SportClient::Move(vx, vy, vyaw) 下发给 Go2。
  * 独立于 hand-lio：这是控制下发链路，跟 hand-lio 的感知/定位链路职责不同，
  * 不共用节点、不共用生命周期。
@@ -16,6 +17,7 @@
 
 #include <geometry_msgs/Twist.h>
 #include <ros/ros.h>
+#include <topic_tools/shape_shifter.h>
 
 #include <unitree/idl/go2/SportModeState_.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
@@ -29,7 +31,10 @@ public:
     ~CmdVelBridge();
 
 private:
-    void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
+    // 用 ShapeShifter 而不是固定类型订阅：第三方发布者可能发 geometry_msgs/Twist
+    // 或 geometry_msgs/TwistStamped，二者取其一都能接，靠运行时的 getDataType()
+    // 分流到对应的解析分支（见 .cpp），不用因为类型不一致被 ROS 断开连接。
+    void cmdVelCallback(const topic_tools::ShapeShifter::ConstPtr& msg);
     void controlTimerCallback(const ros::TimerEvent&);
 
     // 开机自动站立：RecoveryStand() 对起始姿态没有要求（趴着/蹲着都能站起来，

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include <geometry_msgs/TwistStamped.h>
+
 namespace unitree_bridge {
 
 namespace {
@@ -81,7 +83,7 @@ CmdVelBridge::CmdVelBridge(ros::NodeHandle& nh, ros::NodeHandle& pnh) {
     applyInitialMotionMode();
 
     // 站立完成之后才创建订阅者/定时器，站立过程中不会有 cmd_vel 被处理
-    cmd_vel_sub_ = nh.subscribe(cmd_vel_topic, 1, &CmdVelBridge::cmdVelCallback, this);
+    cmd_vel_sub_ = nh.subscribe<topic_tools::ShapeShifter>(cmd_vel_topic, 1, &CmdVelBridge::cmdVelCallback, this);
     control_timer_ =
         nh.createTimer(ros::Duration(1.0 / control_rate_hz_), &CmdVelBridge::controlTimerCallback, this);
 
@@ -226,11 +228,26 @@ CmdVelBridge::~CmdVelBridge() {
     sport_client_.StopMove();
 }
 
-void CmdVelBridge::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg) {
+void CmdVelBridge::cmdVelCallback(const topic_tools::ShapeShifter::ConstPtr& msg) {
+    const std::string& type = msg->getDataType();
+
+    geometry_msgs::Twist twist;
+    if (type == "geometry_msgs/Twist") {
+        twist = *msg->instantiate<geometry_msgs::Twist>();
+    } else if (type == "geometry_msgs/TwistStamped") {
+        twist = msg->instantiate<geometry_msgs::TwistStamped>()->twist;
+    } else {
+        ROS_ERROR_THROTTLE(5.0,
+                            "[unitree_bridge] cmd_vel: unsupported message type '%s' (expected "
+                            "geometry_msgs/Twist or geometry_msgs/TwistStamped), ignoring",
+                            type.c_str());
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(cmd_mutex_);
-    vx_ = Clamp(msg->linear.x, max_vx_);
-    vy_ = Clamp(msg->linear.y, max_vy_);
-    vyaw_ = Clamp(msg->angular.z, max_vyaw_);
+    vx_ = Clamp(twist.linear.x, max_vx_);
+    vy_ = Clamp(twist.linear.y, max_vy_);
+    vyaw_ = Clamp(twist.angular.z, max_vyaw_);
     last_cmd_time_ = ros::Time::now();
     have_cmd_ = true;
 }
