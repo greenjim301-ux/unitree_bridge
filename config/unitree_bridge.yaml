@@ -17,7 +17,7 @@ auto_stand_on_start: true # 节点启动时是否自动 RecoveryStand()（对起
 stand_settle_sec: 3.0 # 发完 RecoveryStand() 后阻塞等待这么久再开始接收 cmd_vel，给站立留物理执行时间
 
 # 站立完成后设置初始运动模式（在开始接收 cmd_vel 之前完成）
-classic_walk_on_start: true # 切换到经典步态：速度跟随比 AI 步态更线性，侧移更稳，适合闭环速度控制
+classic_walk_on_start: false # 不再切经典步态，站立后保持机器人默认的灵动（AI）步态
 mode_settle_sec: 1.0 # 切完步态后阻塞等待这么久，给切换动作留出执行时间
 
 # 步态切换的回读确认。SDK 的 SportClient 没有 ClassicWalkGet() 这类查询接口，
